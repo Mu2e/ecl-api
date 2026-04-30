@@ -1,8 +1,6 @@
 # ecl-api
 
-[![PyPI - Version](https://img.shields.io/pypi/v/ecl-api.svg)](https://pypi.org/project/ecl-api)
-[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ecl-api.svg)](https://pypi.org/project/ecl-api)
-![pylint](https://github.com/marcodeltutto/ecl-api/actions/workflows/pylint.yml/badge.svg)
+> Forked from [marcodeltutto/ecl-api](https://github.com/marcodeltutto/ecl-api).
 
 -----
 
@@ -74,6 +72,34 @@ Retrieve the last N entries in a certain category
 text = ecl.search(category='Shift', limit=3)
 ```
 
+`search` accepts several optional filters — combine any of them:
+
+| Argument     | Description                                                                 |
+|--------------|-----------------------------------------------------------------------------|
+| `category`   | Category name (defaults to `'Purity+Monitors'` for legacy reasons; pass `''` to disable) |
+| `after`      | Only entries after this time. Accepts `'<n>days'`, `'<n>hours'`, `'<n>minutes'`, or `'yyyy-mm-dd+hh:mm:ss'` |
+| `before`     | Same format as `after`, upper bound                                         |
+| `form_name`  | Restrict to a particular form                                               |
+| `tag`        | Restrict to entries with this tag                                           |
+| `username`   | Restrict to entries by this author                                          |
+| `substring`  | Free-text substring match in the entry body (slow — no index)               |
+| `words`      | Indexed word search (faster than `substring`)                               |
+| `limit`      | Max number of entries to return                                             |
+| `ids_only`   | If `True`, return a `list[int]` of entry IDs only (cheap, server-side)      |
+| `as_json`    | If `True`, return a `list[dict]` instead of raw XML                         |
+
+Examples:
+```python
+# Last 24 hours of shift entries from a specific user
+ecl.search(category='Shift', after='1days', username='sgrant', as_json=True)
+
+# Just the IDs of the 50 most recent entries with a tag
+ecl.search(category='', tag='onsite', limit=50, ids_only=True)
+
+# Indexed full-text search
+ecl.search(category='', words='cryostat warmup', as_json=True)
+```
+
 Unpack content of `text`:
 ```python
 import xml.etree.ElementTree as ET
@@ -84,6 +110,49 @@ for entry in entries:
 	print(entry.attrib, entry.tag)
 	...
 ```
+
+### Returning parsed objects (JSON-friendly)
+
+By default, `search`, `get_entry`, and `post` return raw XML/text. Set `as_json=True`
+on either the constructor (default for every call) or on a single call to get
+parsed Python objects instead:
+
+```python
+ecl = ECL(url=url, user='sbndprm', password=password, as_json=True)
+
+entries = ecl.search(category='Shift', limit=3)
+# -> list[dict], one dict per entry. Typical keys:
+#    id (int), author, subject, category, timestamp,
+#    html, formatted, form, images (int), files (int),
+#    text, tags (list[str]), and fields (dict) when the form has extra fields.
+
+entry = ecl.get_entry(entry_id=7252)
+# -> dict with the same shape
+```
+
+Per-call override:
+```python
+entries = ecl.search(category='Shift', limit=3, as_json=True)
+ids = ecl.search(category='Shift', limit=3, ids_only=True)  # list[int]
+```
+
+### Listing categories, tags, and forms
+
+The ECL XML API does not expose category/tag/form catalogs directly. Instead,
+these helpers sample the most recent `sample_size` entries (default 500) and
+return the unique values seen. Results are cached on the `ECL` instance after
+the first call — pass `force_refresh=True` to re-sample.
+
+```python
+ecl.list_categories()       # -> sorted list[str]
+ecl.list_tags()             # -> sorted list[str]
+ecl.list_forms()            # -> sorted list[str]
+
+ecl.list_categories(sample_size=2000)
+ecl.list_tags(force_refresh=True)
+```
+
+Note: rarely-used categories/tags may not appear if no recent entry uses them.
 
 
 ## License

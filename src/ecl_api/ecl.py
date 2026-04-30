@@ -1,9 +1,11 @@
 '''
 Contains code to talk to the ECL API
 '''
+import os
 import uuid
 import hashlib
 import requests
+import xml.etree.ElementTree as etree
 from urllib.parse import urlparse
 
 class ECL:
@@ -13,55 +15,150 @@ class ECL:
 
     #pylint: disable=invalid-name,too-many-arguments
 
-    def __init__(self, url, user, password, timeout=60, debug=False):
+    def __init__(self, url=None, user=None, password=None, timeout=60, debug=False, as_json=False):
         '''
         Contructor
 
         Args:
-            url (str): the URL
-            user (str): the username
-            password (str): the password
+            url (str): the URL. Falls back to the ECL_URL environment variable.
+            user (str): the username. Falls back to the ECL_USER_NAME environment variable.
+            password (str): the password. Falls back to the ECL_PASSWORD environment variable.
             timeout (int): request timeout in seconds
+            as_json (bool): default response format. If True, methods return parsed
+                            Python objects (dicts/lists) instead of raw XML/text.
+                            Each method accepts its own as_json= override.
         '''
 
-        self._url = url if self.check_server(url) else self.get_active_server()
+        url = url if url is not None else os.environ.get('ECL_URL')
+        user = user if user is not None else os.environ.get('ECL_USER_NAME')
+        password = password if password is not None else os.environ.get('ECL_PASSWORD')
+
+        if user is None:
+            raise ValueError('ECL user not provided (pass user= or set ECL_USER_NAME)')
+        if password is None:
+            raise ValueError('ECL password not provided (pass password= or set ECL_PASSWORD)')
+
+        self._url = self._normalize_url(self._resolve_server(url))
         self._password = password
         self._user = user
 
         self._to = timeout
 
         self._debug = debug
+        self._as_json = as_json
 
-    def check_server(self, base_url, timeout=5):
-        """
-        Check if a server is responsive.
-        Returns True if server responds, False otherwise.
-        """
-        if base_url == '' or base_url is None:
-            return False
-        try:
-            response = requests.get(base_url, timeout=timeout)
-            return response.status_code == 200
-        except requests.exceptions.RequestException:
-            return False
+        self._metadata_cache = None
 
-    def get_active_server(self, base_url="https://dbweb0.fnal.gov/ECL/sbnd/E/index"):
+    def _sample_metadata(self, sample_size=500, force_refresh=False):
         """
-        Follow redirect from dbweb0 to find the active server.
-        Returns the base URL of the active server.
+        Sample recent entries and collect the unique categories, tags, and
+        forms in use. Result is cached on the instance after the first call.
         """
+        if self._metadata_cache is not None and not force_refresh:
+            return self._metadata_cache
+
+        entries = self.search(limit=sample_size, as_json=True)
+
+        categories = set()
+        tags = set()
+        forms = set()
+        for e in entries:
+            if e.get('category'):
+                categories.add(e['category'])
+            if e.get('form'):
+                forms.add(e['form'])
+            for t in e.get('tags', []):
+                if t:
+                    tags.add(t)
+
+        self._metadata_cache = {
+            'categories': sorted(categories),
+            'tags': sorted(tags),
+            'forms': sorted(forms),
+        }
+        return self._metadata_cache
+
+    def list_categories(self, sample_size=500, force_refresh=False):
+        """Return the categories seen in the most recent `sample_size` entries."""
+        return self._sample_metadata(sample_size, force_refresh)['categories']
+
+    def list_tags(self, sample_size=500, force_refresh=False):
+        """Return the tags seen in the most recent `sample_size` entries."""
+        return self._sample_metadata(sample_size, force_refresh)['tags']
+
+    def list_forms(self, sample_size=500, force_refresh=False):
+        """Return the forms seen in the most recent `sample_size` entries."""
+        return self._sample_metadata(sample_size, force_refresh)['forms']
+
+    def _want_json(self, as_json):
+        return self._as_json if as_json is None else as_json
+
+    @staticmethod
+    def _entry_to_dict(entry):
+        """Convert an <entry> element into a JSON-friendly dict."""
+        out = dict(entry.attrib)
+        for key in ('id', 'images', 'files'):
+            if key in out:
+                try:
+                    out[key] = int(out[key])
+                except (TypeError, ValueError):
+                    pass
+
+        subject = entry.find('subject')
+        if subject is not None and subject.text is not None:
+            out['subject'] = subject.text
+
+        text = entry.find('text')
+        if text is not None and text.text is not None:
+            out['text'] = text.text
+
+        out['tags'] = [t.attrib.get('name') for t in entry.findall('tag') if t.attrib.get('name')]
+
+        form = entry.find('form')
+        if form is not None:
+            out['form'] = form.attrib.get('name')
+            out['fields'] = {
+                f.attrib.get('name'): f.text
+                for f in form.findall('field')
+                if f.attrib.get('name')
+            }
+
+        return out
+
+    @staticmethod
+    def _normalize_url(url):
+        """Strip a trailing /index and ensure the URL ends with /E."""
+        if not url:
+            return url
+        url = url.rstrip('/')
+        if url.endswith('/index'):
+            url = url[:-len('/index')]
+        if not url.endswith('/E'):
+            url = url + '/E'
+        return url
+
+    def _resolve_server(self, base_url):
+        """
+        Resolve base_url to the active server, following any redirects.
+        Preserves the experiment path (e.g. /ECL/mu2e/E) from base_url so
+        a mu2e URL is never silently rewritten into a different experiment.
+        """
+        if base_url is None:
+            raise ValueError('ECL url not provided (pass url= or set ECL_URL)')
+
+        parsed_in = urlparse(base_url)
+        path = parsed_in.path.rstrip('/')
+        if path.endswith('/index'):
+            path = path[:-len('/index')]
+        if not path.endswith('/E'):
+            path = path + '/E'
+
+        probe_url = f"{parsed_in.scheme or 'https'}://{parsed_in.netloc}{path}/index"
+
         try:
-            # Make a request that allows redirects
-            response = requests.get(base_url, allow_redirects=True, timeout=10)
-            
-            # Extract the final URL after redirects
-            final_url = response.url
-            
-            # Parse to get the scheme and netloc (e.g., https://dbweb1.fnal.gov:8443)
-            parsed = urlparse(final_url)
-            active_server = f"{parsed.scheme}://{parsed.netloc}/ECL/sbnd/E"
-            
-            return active_server
+            response = requests.get(probe_url, allow_redirects=True, timeout=10)
+            parsed = urlparse(response.url)
+            return f"{parsed.scheme}://{parsed.netloc}{path}"
         except requests.exceptions.RequestException as e:
             print(f"Error discovering active server: {e}")
             return None
@@ -94,7 +191,7 @@ class ECL:
 
 
     def search(self,
-               category='Purity+Monitors',
+               category='',
                after='',
                before='',
                form_name='',
@@ -102,7 +199,9 @@ class ECL:
                username='',
                substring='',
                words='',
-               limit=100):
+               limit=100,
+               ids_only=False,
+               as_json=None):
         '''
         Searched the last entries in a given category
 
@@ -124,6 +223,11 @@ class ECL:
             substring: search for entries having specified text as substring - can be slow
             words: indexed search for entries having the words
             limit (int): limit to the number of entries
+            ids_only (bool): if True, request only entry IDs from the server
+                             and return a list[int] of IDs instead of raw XML
+            as_json (bool): if True, parse the XML and return a list[dict].
+                            Ignored when ids_only=True (that already returns
+                            a list[int]). Defaults to the instance setting.
         '''
 
         url = self._url
@@ -149,6 +253,8 @@ class ECL:
             arguments += f'si={words}&'
         if limit is not None:
             arguments += f'l={limit}&'
+        if ids_only:
+            arguments += 'o=ids&'
         arguments += self.generate_salt()
 
         # headers = {'content-type': 'text/xml'}
@@ -161,16 +267,26 @@ class ECL:
 
         r = requests.get(url + arguments, headers=headers, timeout=self._to)
 
+        if ids_only:
+            root = etree.fromstring(r.text)
+            return [int(e.attrib['id']) for e in root.findall('entry')]
+
+        if self._want_json(as_json):
+            root = etree.fromstring(r.text)
+            return [self._entry_to_dict(e) for e in root.findall('entry')]
+
         return r.text
 
 
 
-    def get_entry(self, entry_id=2968):
+    def get_entry(self, entry_id, as_json=None):
         '''
         Gets a particular entry.
 
         Args:
-            entry_id (int): The ID of the entry 
+            entry_id (int): The ID of the entry
+            as_json (bool): if True, parse the XML and return a dict.
+                            Defaults to the instance setting.
         '''
 
         url = self._url
@@ -187,16 +303,26 @@ class ECL:
 
         r = requests.get(url + arguments, headers=headers, timeout=self._to)
 
+        if self._want_json(as_json):
+            root = etree.fromstring(r.text)
+            entry = root if root.tag == 'entry' else root.find('entry')
+            if entry is None:
+                return {}
+            return self._entry_to_dict(entry)
+
         return r.text
 
 
-    def post(self, entry, do_post=False):
+    def post(self, entry, do_post=False, as_json=None):
         '''
         Posts an entry to the e-log
 
         Args:
             entry (ECLEntry): the entry
             do_post (bool): set this to True to submit the entry to the ECL
+            as_json (bool): if True, return a dict {status, reason, body}
+                            instead of the raw response text. Defaults to the
+                            instance setting.
         '''
 
         entry.set_author(self._user)
@@ -221,11 +347,16 @@ class ECL:
             print('Headers:', headers)
             print('URL:', url + arguments)
 
-        if do_post:
-            r = requests.post(url + arguments, headers=headers, data=xml_data, timeout=self._to)
+        if not do_post:
+            return None
 
-            if self._debug:
-                print(r.url)
-                print(r.text)
+        r = requests.post(url + arguments, headers=headers, data=xml_data, timeout=self._to)
 
-            print('Posted.')
+        if self._debug:
+            print(r.url)
+            print(r.text)
+
+        if self._want_json(as_json):
+            return {'status': r.status_code, 'reason': r.reason, 'body': r.text}
+
+        return r.text
