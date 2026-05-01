@@ -34,6 +34,6 @@ def list_forms(sample_size: int = 500, force_refresh: bool = False) -> list[str]
 
 
 def register(mcp) -> None:
-    mcp.tool()(list_categories)
-    mcp.tool()(list_tags)
-    mcp.tool()(list_forms)
+    mcp.tool(name="ecl_list_categories")(list_categories)
+    mcp.tool(name="ecl_list_tags")(list_tags)
+    mcp.tool(name="ecl_list_forms")(list_forms)

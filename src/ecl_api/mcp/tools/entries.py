@@ -89,6 +89,6 @@ def get_entry(entry_id: int) -> dict[str, Any]:
 
 
 def register(mcp) -> None:
-    mcp.tool()(search_entries)
-    mcp.tool()(search_entry_ids)
-    mcp.tool()(get_entry)
+    mcp.tool(name="ecl_search_entries")(search_entries)
+    mcp.tool(name="ecl_search_entry_ids")(search_entry_ids)
+    mcp.tool(name="ecl_get_entry")(get_entry)

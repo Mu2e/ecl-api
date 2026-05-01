@@ -72,4 +72,4 @@ def post_entry(
 
 
 def register(mcp) -> None:
-    mcp.tool()(post_entry)
+    mcp.tool(name="ecl_post_entry")(post_entry)
