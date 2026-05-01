@@ -154,6 +154,55 @@ ecl.list_tags(force_refresh=True)
 
 Note: rarely-used categories/tags may not appear if no recent entry uses them.
 
+## MCP server
+
+`ecl-api` ships an optional [Model Context Protocol](https://modelcontextprotocol.io)
+server that exposes ECL search, retrieval, and (optionally) posting as tools
+for LLM agents.
+
+Install with the `mcp` extra:
+```console
+pip install "ecl-api[mcp]"
+```
+
+Set the same environment variables the library reads:
+```bash
+export ECL_URL="https://dbweb9.fnal.gov:8443/ECL/sbnd/E"
+export ECL_USER_NAME="xml-user"
+export ECL_PASSWORD="..."
+```
+
+Run the server:
+```console
+ecl-mcp           # stdio transport — for Claude Desktop and similar clients
+ecl-mcp-stdio     # alias of ecl-mcp
+ecl-mcp-server    # streamable-http on 127.0.0.1:8766
+```
+
+### Read-only by default
+
+The server is **read-only by default**: only `search_entries`, `search_entry_ids`,
+`get_entry`, `list_categories`, `list_tags`, and `list_forms` are registered.
+To enable the `post_entry` tool, set:
+```bash
+export ECL_MCP_READ_ONLY=false
+```
+
+`post_entry` itself takes a `do_post` argument (default `False`) so an agent
+can prepare and inspect entries without committing them.
+
+### Environment variables
+
+| Variable             | Default       | Purpose                                  |
+|----------------------|---------------|------------------------------------------|
+| `ECL_URL`            | _(required)_  | ECL base URL                             |
+| `ECL_USER_NAME`      | _(required)_  | XML user name                            |
+| `ECL_PASSWORD`       | _(required)_  | XML user password                        |
+| `ECL_MCP_READ_ONLY`  | `true`        | Set to `false` to register `post_entry`  |
+| `ECL_MCP_HOST`       | `127.0.0.1`   | HTTP bind host (`ecl-mcp-server` only)   |
+| `ECL_MCP_PORT`       | `8766`        | HTTP bind port (`ecl-mcp-server` only)   |
+| `ECL_MCP_LOG_LEVEL`  | `WARNING`     | Logger level                             |
+
 
 ## License
 

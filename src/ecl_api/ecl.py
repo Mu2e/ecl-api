@@ -94,8 +94,42 @@ class ECL:
         return self._as_json if as_json is None else as_json
 
     @staticmethod
+    def _parse_entries(xml_text):
+        """Parse <entries> XML into a list of <entry> elements.
+
+        Falls back to per-entry parsing if the document as a whole is
+        malformed (occasionally an entry contains control characters or
+        unescaped markup that breaks the strict parser).
+        """
+        try:
+            root = etree.fromstring(xml_text)
+            return root.findall('entry')
+        except etree.ParseError:
+            pass
+
+        entries = []
+        chunks = xml_text.split('</entry>')
+        for chunk in chunks[:-1]:
+            start = chunk.find('<entry')
+            if start < 0:
+                continue
+            piece = chunk[start:] + '</entry>'
+            try:
+                entries.append(etree.fromstring(piece))
+            except etree.ParseError:
+                continue
+        return entries
+
+    @staticmethod
     def _entry_to_dict(entry):
-        """Convert an <entry> element into a JSON-friendly dict."""
+        """Convert an <entry> element into a JSON-friendly dict.
+
+        Handles both shapes returned by the API:
+          - xml_search: <entry id=... images=... files=...> with <text>,
+                        <subject>, <tag>, <form><field/></form> children.
+          - xml_get:    bare <entry> (no id), text lives inside
+                        <form><field name="text">...</field></form>.
+        """
         out = dict(entry.attrib)
         for key in ('id', 'images', 'files'):
             if key in out:
@@ -117,11 +151,17 @@ class ECL:
         form = entry.find('form')
         if form is not None:
             out['form'] = form.attrib.get('name')
-            out['fields'] = {
+            fields = {
                 f.attrib.get('name'): f.text
                 for f in form.findall('field')
                 if f.attrib.get('name')
             }
+            # xml_get puts the body in <field name="text"> — promote it so
+            # callers can read out['text'] regardless of which endpoint hit.
+            if 'text' in fields and 'text' not in out:
+                out['text'] = fields.pop('text')
+            if fields:
+                out['fields'] = fields
 
         return out
 
@@ -268,12 +308,11 @@ class ECL:
         r = requests.get(url + arguments, headers=headers, timeout=self._to)
 
         if ids_only:
-            root = etree.fromstring(r.text)
-            return [int(e.attrib['id']) for e in root.findall('entry')]
+            return [int(e.attrib['id']) for e in self._parse_entries(r.text)
+                    if 'id' in e.attrib]
 
         if self._want_json(as_json):
-            root = etree.fromstring(r.text)
-            return [self._entry_to_dict(e) for e in root.findall('entry')]
+            return [self._entry_to_dict(e) for e in self._parse_entries(r.text)]
 
         return r.text
 
@@ -304,11 +343,26 @@ class ECL:
         r = requests.get(url + arguments, headers=headers, timeout=self._to)
 
         if self._want_json(as_json):
-            root = etree.fromstring(r.text)
-            entry = root if root.tag == 'entry' else root.find('entry')
-            if entry is None:
+            entries = self._parse_entries(r.text)
+            element = None
+            if entries:
+                element = entries[0]
+            else:
+                # _parse_entries already failed to recover; if the response
+                # is a bare <entry> root, try parsing it directly.
+                try:
+                    root = etree.fromstring(r.text)
+                    if root.tag == 'entry':
+                        element = root
+                except etree.ParseError:
+                    pass
+            if element is None:
                 return {}
-            return self._entry_to_dict(entry)
+            out = self._entry_to_dict(element)
+            # xml_get omits the id (the caller already knows it); inject it
+            # so the dict shape matches what xml_search produces.
+            out.setdefault('id', int(entry_id))
+            return out
 
         return r.text
 

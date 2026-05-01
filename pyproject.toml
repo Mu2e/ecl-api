@@ -28,6 +28,17 @@ dependencies = [
   "requests",
 ]
 
+[project.optional-dependencies]
+mcp = [
+  "mcp>=1.0.0",
+  "uvicorn>=0.27.0",
+]
+
+[project.scripts]
+ecl-mcp-server = "ecl_api.mcp.http:main"
+ecl-mcp-stdio = "ecl_api.mcp.stdio:main"
+ecl-mcp = "ecl_api.mcp.stdio:main"
+
 [project.urls]
 Documentation = "https://github.com/marcodeltutto/ecl-api#readme"
 Issues = "https://github.com/marcodeltutto/ecl-api/issues"
