@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 import os
 
-from mcp.server.fastmcp import FastMCP
+try:  # mcp >= 2: FastMCP was renamed to MCPServer
+    from mcp.server.mcpserver import MCPServer as FastMCP
+except ImportError:  # mcp 1.x
+    from mcp.server.fastmcp import FastMCP
 
 from .tools import register_all
 
