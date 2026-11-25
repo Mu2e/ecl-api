@@ -29,15 +29,25 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# ecl_api.mcp targets the pre-2.0 SDK: it imports mcp.server.fastmcp, which
+# mcp 2.x removed (FastMCP was renamed to MCPServer). An unbounded ">=1.0.0"
+# resolves happily to 2.x and then fails at import time, so cap it.
 mcp = [
-  "mcp>=1.0.0",
+  "mcp>=1.0.0,<2",
   "uvicorn>=0.27.0",
 ]
 
+# NOTE: console scripts are installed unconditionally -- the [mcp] extra gates
+# the dependencies, not these entry points. So every downstream consumer gets
+# these names in its venv whether or not it asked for the extra, and a name
+# claimed here will overwrite a same-named script from another distribution
+# (last install wins). Keep these prefixed/specific for that reason: a bare
+# `ecl-mcp` alias used to live here and silently clobbered the unrelated
+# ecl-mcp distribution's own entry point in Mu2e/aitools (mcp/ecl), whose
+# wrapper then ran this v1 code against mcp 2.x.
 [project.scripts]
 ecl-mcp-server = "ecl_api.mcp.http:main"
 ecl-mcp-stdio = "ecl_api.mcp.stdio:main"
-ecl-mcp = "ecl_api.mcp.stdio:main"
 
 [project.urls]
 Documentation = "https://github.com/marcodeltutto/ecl-api#readme"

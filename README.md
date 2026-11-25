@@ -174,8 +174,7 @@ export ECL_PASSWORD="..."
 
 Run the server:
 ```console
-ecl-mcp           # stdio transport — for Claude Desktop and similar clients
-ecl-mcp-stdio     # alias of ecl-mcp
+ecl-mcp-stdio     # stdio transport — for Claude Desktop and similar clients
 ecl-mcp-server    # streamable-http on 127.0.0.1:8766
 ```
 
