@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -54,8 +54,13 @@ Documentation = "https://github.com/marcodeltutto/ecl-api#readme"
 Issues = "https://github.com/marcodeltutto/ecl-api/issues"
 Source = "https://github.com/marcodeltutto/ecl-api"
 
+# Version comes from the nearest git tag (hatch-vcs, which wraps setuptools_scm),
+# not a hand-maintained field or module -- same convention as Mu2e/aitools. A
+# `v0.0.3` tag builds 0.0.3; an untagged commit past it builds something like
+# 0.0.4.dev2+g71e65d1, so a dist installed off a moving branch says so in its
+# own version instead of silently reusing the last release's number.
 [tool.hatch.version]
-path = "src/ecl_api/__about__.py"
+source = "vcs"
 
 [tool.hatch.envs.types]
 extra-dependencies = [
@@ -68,9 +73,6 @@ check = "mypy --install-types --non-interactive {args:src/ecl_api tests}"
 source_pkgs = ["ecl_api", "tests"]
 branch = true
 parallel = true
-omit = [
-  "src/ecl_api/__about__.py",
-]
 
 [tool.coverage.paths]
 ecl_api = ["src/ecl_api", "*/ecl-api/src/ecl_api"]
